@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-OBJ Morph Engine with Audio Reactive Background Lighting</title>
+    <style>
+        * { box-sizing: border-box; user-select: none; }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; 
+            /* Base system uses a true dark dark backdrop that gets illuminated via js gradients */
+            background-color: #010103;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #fff;
+        }
+        
+        #reactive-lighting-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 0;
+            pointer-events: none;
+            mix-blend-mode: screen;
+            opacity: 0.65; /* Balanced ambient background intensity */
+        }
+
+        #canvas-container { 
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0; 
+            z-index: 1; pointer-events: none; 
+        }
+
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10; pointer-events: none; display: flex;
+            flex-direction: column; justify-content: space-between; padding: 25px;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+        }
+        #ui-layer.hidden { opacity: 0; visibility: hidden; }
+
+        .interactive { pointer-events: auto; }
+        header { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; height: calc(100% - 80px); }
+        
+        #control-panel {
+            background: rgba(2, 2, 8, 0.92); padding: 20px; border-radius: 14px;
+            backdrop-filter: blur(25px); border: 1px solid rgba(255, 255, 255, 0.05);
+            width: 350px; box-shadow: 0 20px 50px rgba(0,0,0,0.95);
+            display: flex; flex-direction: column; max-height: 100%;
+        }
+        h1 { font-size: 13px; font-weight: 700; letter-spacing: 2px; margin: 0 0 15px 0; text-transform: uppercase; color: #ff3366; flex-shrink: 0; }
+        
+        .panel-scroll-area { flex-grow: 1; overflow-y: auto; padding-right: 5px; margin-bottom: 15px; }
+        .panel-scroll-area::-webkit-scrollbar { width: 4px; }
+        .panel-scroll-area::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        .panel-scroll-area::-webkit-scrollbar-thumb { background: #ff3366; border-radius: 2px; }
+
+        .file-input-container { position: relative; margin-bottom: 10px; }
+        .file-label {
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(255, 255, 255, 0.01); border: 1px dashed rgba(255, 51, 102, 0.4);
+            padding: 12px; border-radius: 8px; cursor: pointer; transition: all 0.3s; font-size: 11px;
+        }
+        .file-label:hover { background: rgba(255, 51, 102, 0.08); border-color: #ff3366; color: #ff3366; }
+        input[type="file"] { position: absolute; left: 0; top: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+        
+        .slider-block { margin-bottom: 10px; background: rgba(255, 255, 255, 0.01); padding: 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.02); }
+        .slider-label { display: flex; justify-content: space-between; font-size: 10px; color: #aa7788; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+        .ui-slider { width: 100%; -webkit-appearance: none; appearance: none; background: #06060c; height: 4px; border-radius: 2px; outline: none; }
+        .ui-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #ff3366; cursor: pointer; }
+        
+        .selector-heading { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin: 15px 0 8px 0; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 3px; }
+        
+        .select-wrapper { margin-bottom: 12px; }
+        select { width: 100%; background: #0b0615; border: 1px solid rgba(255, 51, 102, 0.3); padding: 8px; border-radius: 6px; color: white; font-size: 11px; outline: none; cursor: pointer; }
+
+        .quick-nav-block { display: flex; gap: 5px; margin-bottom: 12px; }
+        .nav-btn { background: #120c1e; border: 1px solid rgba(255, 51, 102, 0.3); color: #ff3366; font-weight: bold; width: 50%; padding: 8px; font-size: 11px; }
+        .nav-btn:hover { background: #ff3366; color: #000; }
+
+        .formula-checkbox-row {
+            display: flex; align-items: center; margin-bottom: 6px; padding: 6px 8px;
+            background: rgba(255,255,255,0.02); border-radius: 6px; border: 1px solid rgba(255,255,255,0.02);
+            transition: all 0.2s; cursor: pointer;
+        }
+        .formula-checkbox-row:hover { background: rgba(255, 51, 102, 0.05); border-color: rgba(255, 51, 102, 0.2); }
+        .formula-checkbox-row.active-rendering { background: rgba(255, 51, 102, 0.15); border-color: #ff3366; }
+        .formula-checkbox-row input[type="checkbox"] { margin-right: 10px; accent-color: #ff3366; cursor: pointer; }
+        .formula-checkbox-row label { font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-grow: 1; }
+
+        .core-action-grid { display: flex; gap: 6px; margin-bottom: 4px; flex-shrink: 0; }
+        .core-action-grid button { margin-bottom: 0; }
+        #btn-play { width: 65%; }
+        #btn-restart { width: 35%; background: #160912; border-color: rgba(255, 51, 102, 0.25); color: #ff3366; }
+        #btn-restart:hover:not(:disabled) { background: #ff3366; color: #000; }
+
+        button {
+            background: #090406; color: white; border: 1px solid rgba(255,255,255,0.05);
+            padding: 12px; border-radius: 8px; cursor: pointer; font-size: 10px;
+            font-weight: 700; letter-spacing: 1px; text-transform: uppercase; width: 100%; transition: all 0.2s;
+            flex-shrink: 0; margin-bottom: 8px;
+        }
+        button:hover:not(:disabled) { background: white; color: black; }
+        button:disabled { opacity: 0.15; cursor: not-allowed; }
+
+        #status-display { font-size: 11px; color: #ff3366; margin-top: 10px; flex-shrink: 0; line-height: 1.4; }
+        
+        footer { display: flex; justify-content: space-between; align-items: flex-end; width: 100%; height: 50px; }
+        #controls-legend { background: rgba(0, 0, 0, 0.85); padding: 10px 18px; border-radius: 8px; font-size: 11px; color: #ff3366; }
+        #time-scratch-bar { width: 400px; background: rgba(2, 2, 8, 0.96); padding: 12px 20px; border-radius: 30px; border: 1px solid rgba(255, 255, 255, 0.06); display: flex; align-items: center; gap: 15px; }
+        #progress-slider { flex-grow: 1; -webkit-appearance: none; appearance: none; background: #0f0f18; height: 4px; border-radius: 2px; outline: none; }
+        #progress-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #ff3366; cursor: pointer; }
+        #time-display { font-family: monospace; font-size: 11px; color: #ff3366; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="visualModes.js"></script>
+</head>
+<body>
+
+    <div id="reactive-lighting-layer"></div>
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        <header>
+            <div id="control-panel" class="interactive">
+                <h1>WMP Transform Engine v1.5</h1>
+                
+                <div class="panel-scroll-area">
+                    <div class="file-input-container">
+                        <label class="file-label">
+                            <span id="audio-label-text">📂 Inject Audio Mix</span>
+                            <input type="file" id="audio-file" accept="audio/*">
+                        </label>
+                    </div>
+
+                    <div class="file-input-container">
+                        <label class="file-label" style="border-color: rgba(0, 255, 150, 0.4);">
+                            <span id="obj-label-text" style="color: #00ff96;">📐 Load OBJ Models (Multi)</span>
+                            <input type="file" id="obj-file" accept=".obj" multiple>
+                        </label>
+                    </div>
+
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Global Scale Modifier</span><span id="zoom-val">1.0x</span></div>
+                        <input type="range" id="zoom-slider" class="ui-slider" min="0.1" max="4.0" step="0.05" value="1.0">
+                    </div>
+
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Audio Sensitivity Threshold</span><span id="threshold-val">0.76</span></div>
+                        <input type="range" id="threshold-slider" class="ui-slider" min="0.10" max="1.00" step="0.01" value="0.76">
+                    </div>
+
+                    <div class="selector-heading">Prearrange Selected Asset</div>
+                    <div class="select-wrapper">
+                        <select id="model-config-select">
+                            <option value="0">Default Primary Shell</option>
+                        </select>
+                    </div>
+
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Translate Pos X</span><span id="tx-val">0.0</span></div>
+                        <input type="range" id="slider-tx" class="ui-slider" min="-25" max="25" step="0.2" value="0">
+                    </div>
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Translate Pos Y</span><span id="ty-val">0.0</span></div>
+                        <input type="range" id="slider-ty" class="ui-slider" min="-25" max="25" step="0.2" value="0">
+                    </div>
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Translate Pos Z</span><span id="tz-val">0.0</span></div>
+                        <input type="range" id="slider-tz" class="ui-slider" min="-25" max="25" step="0.2" value="0">
+                    </div>
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Base Rotation X</span><span id="rx-val">0°</span></div>
+                        <input type="range" id="slider-rx" class="ui-slider" min="-180" max="180" step="5" value="0">
+                    </div>
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Base Rotation Y</span><span id="ry-val">0°</span></div>
+                        <input type="range" id="slider-ry" class="ui-slider" min="-180" max="180" step="5" value="0">
+                    </div>
+                    <div class="slider-block">
+                        <div class="slider-label"><span>Base Rotation Z</span><span id="rz-val">0°</span></div>
+                        <input type="range" id="slider-rz" class="ui-slider" min="-180" max="180" step="5" value="0">
+                    </div>
+
+                    <div class="selector-heading">Reactive Physics Style</div>
+                    <div class="quick-nav-block">
+                        <button id="btn-prev-case" class="nav-btn">◀ Prev Mode</button>
+                        <button id="btn-next-case" class="nav-btn">Next Mode ▶</button>
+                    </div>
+
+                    <div class="selector-heading">Automated Pool Filter</div>
+                    <div id="checkbox-matrix-container"></div>
+                </div>
+
+                <div class="core-action-grid">
+                    <button id="btn-play" class="interactive" disabled>Execute Core</button>
+                    <button id="btn-restart" class="interactive" disabled>Restart</button>
+                </div>
+                <div id="status-display">Awaiting harmonic models & frequencies...</div>
+            </div>
+        </header>
+
+        <footer>
+            <div id="controls-legend"><span id="system-mode-tag">Awaiting OBJ...</span> | [H] Hide UI | [←/→] Cycle Modes</div>
+            <div id="time-scratch-bar" class="interactive">
+                <span id="time-display">00:00</span>
+                <input type="range" id="progress-slider" min="0" max="100" value="0" disabled>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        let scene, camera, renderer, audioCtx, analyser, audioBuffer, audioSource, frequencyData;
+        let isPlaying = false, startTime = 0, pausedAt = 0;
+        let baseZoomModifier = 1.0;
+        let rotationAngle = 0;
+
+        const TARGET_PARTICLE_COUNT = 25000; 
+        let particleMesh;
+        let positionsArray, colorsArray;
+
+        // Signal Smoothers
+        let smoothSub = 0, smoothLow = 0, smoothMid = 0, smoothHigh = 0;
+
+        // Model Database Registry
+        let modelsBank = [];         
+        let currentModelIndex = 0;   
+        let targetModelIndex = 0;    
+        let morphProgress = 1.0;     
+        let morphSpeed = 0.025;       
+
+        // Physics Mode Transition Fader
+        let previousMode = 0;
+        let modeTransitionProgress = 1.0;
+        const MODE_TRANSITION_SPEED = 0.03;
+
+        let isPrearrangeOverrideActive = false; 
+
+        // Automatically map from window runtime context
+        const MODE_POINTERS = window.WMP_MODES ? window.WMP_MODES.map(m => m.id) : [0, 1, 2, 3, 4];
+        const MODE_LABELS = window.WMP_MODES ? window.WMP_MODES.reduce((acc, m) => { acc[m.id] = m.name; return acc; }, {}) : {
+            0: "Spherical Pulse", 1: "Plasma Field Displacer", 2: "Kinematic Gear Twist", 3: "Magnetic Field Lines", 4: "Digital Soundwave Fountain"
+        };
+
+        let explicitMode = 0; 
+        let activeModesPool = [...MODE_POINTERS]; 
+
+        let currentCamPreset = 0;
+        let lastCutExecutionTime = 0;
+        const SNAP_COOLDOWN = 6.00; 
+        let BEAT_DETECTION_THRESHOLD = 0.76; 
+
+        let currentHueBase = Math.random();
+        let targetHueBase = Math.random();
+
+        // Control Panel Node References
+        const fileInput = document.getElementById('audio-file');
+        const objInput = document.getElementById('obj-file');
+        const playBtn = document.getElementById('btn-play');
+        const restartBtn = document.getElementById('btn-restart');
+        const statusDisplay = document.getElementById('status-display');
+        const progressSlider = document.getElementById('progress-slider');
+        const timeDisplay = document.getElementById('time-display');
+        const zoomSlider = document.getElementById('zoom-slider');
+        const zoomValDisplay = document.getElementById('zoom-val');
+        const thresholdSlider = document.getElementById('threshold-slider');
+        const thresholdValDisplay = document.getElementById('threshold-val');
+        const systemModeTag = document.getElementById('system-mode-tag');
+        const lightingLayer = document.getElementById('reactive-lighting-layer');
+        const checkboxContainer = document.getElementById('checkbox-matrix-container');
+        const uiLayer = document.getElementById('ui-layer');
+        
+        // Transform Node Selectors
+        const modelConfigSelect = document.getElementById('model-config-select');
+        const sliderTx = document.getElementById('slider-tx');
+        const sliderTy = document.getElementById('slider-ty');
+        const sliderTz = document.getElementById('slider-tz');
+        const sliderRx = document.getElementById('slider-rx');
+        const sliderRy = document.getElementById('slider-ry');
+        const sliderRz = document.getElementById('slider-rz');
+
+        function init() {
+            buildCheckboxUI();
+            setupTransformSliderListeners();
+
+            const container = document.getElementById('canvas-container');
+            if(!container) return;
+
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x010103, 0.004);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.3;
+            container.appendChild(renderer.domElement);
+
+            generateFallbackGeometry();
+            updateCameraPosition(0, 0);
+
+            window.addEventListener('resize', onWindowResize, false);
+            fileInput.addEventListener('change', handleFileSelection, false);
+            objInput.addEventListener('change', handleObjSelection, false);
+            
+            playBtn.addEventListener('click', togglePlayback, false);
+            restartBtn.addEventListener('click', restartPlayback, false);
+            
+            document.getElementById('btn-prev-case').addEventListener('click', () => stepMode(-1));
+            document.getElementById('btn-next-case').addEventListener('click', () => stepMode(1));
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'h') {
+                    uiLayer.classList.toggle('hidden');
+                } else if (e.key === 'ArrowRight') {
+                    stepMode(1);
+                } else if (e.key === 'ArrowLeft') {
+                    stepMode(-1);
+                }
+            });
+
+            zoomSlider.addEventListener('input', (e) => {
+                baseZoomModifier = parseFloat(e.target.value);
+                zoomValDisplay.innerText = baseZoomModifier.toFixed(1) + 'x';
+            });
+
+            thresholdSlider.addEventListener('input', (e) => {
+                BEAT_DETECTION_THRESHOLD = parseFloat(e.target.value);
+                thresholdValDisplay.innerText = BEAT_DETECTION_THRESHOLD.toFixed(2);
+            });
+
+            animate();
+        }
+
+        function buildCheckboxUI() {
+            checkboxContainer.innerHTML = '';
+            MODE_POINTERS.forEach((num) => {
+                const row = document.createElement('div');
+                row.className = 'formula-checkbox-row';
+                row.id = `mode-row-${num}`;
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `mode-chk-${num}`;
+                checkbox.checked = activeModesPool.includes(num);
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    updateActivePool(num);
+                });
+
+                const lbl = document.createElement('label');
+                lbl.htmlFor = `mode-chk-${num}`;
+                lbl.innerText = `[${num}] ${MODE_LABELS[num]}`;
+
+                row.appendChild(checkbox);
+                row.appendChild(lbl);
+                
+                row.addEventListener('click', () => {
+                    triggerModeTransition(num);
+                });
+
+                checkboxContainer.appendChild(row);
+            });
+            highlightCurrentMode();
+        }
+
+        function updateActivePool(changedNum) {
+            let pool = [];
+            MODE_POINTERS.forEach((num) => {
+                if(document.getElementById(`mode-chk-${num}`).checked) {
+                    pool.push(num);
+                }
+            });
+            if (pool.length === 0) {
+                document.getElementById(`mode-chk-${changedNum}`).checked = true;
+                pool.push(changedNum);
+            }
+            activeModesPool = pool;
+        }
+
+        function stepMode(direction) {
+            let currentIndex = MODE_POINTERS.indexOf(explicitMode);
+            let nextIndex = currentIndex + direction;
+            
+            if (nextIndex >= MODE_POINTERS.length) nextIndex = 0;
+            if (nextIndex < 0) nextIndex = MODE_POINTERS.length - 1;
+            
+            triggerModeTransition(MODE_POINTERS[nextIndex]);
+        }
+
+        function triggerModeTransition(newModeId) {
+            if (newModeId === explicitMode) return;
+            previousMode = explicitMode;
+            explicitMode = newModeId;
+            modeTransitionProgress = 0.0; 
+            targetHueBase = Math.random();
+            highlightCurrentMode();
+        }
+
+        function highlightCurrentMode() {
+            MODE_POINTERS.forEach((num) => {
+                const row = document.getElementById(`mode-row-${num}`);
+                if (row) {
+                    if (num === explicitMode) {
+                        row.classList.add('active-rendering');
+                    } else {
+                        row.classList.remove('active-rendering');
+                    }
+                }
+            });
+        }
+
+        function setupTransformSliderListeners() {
+            modelConfigSelect.addEventListener('change', (e) => {
+                let selectedIdx = parseInt(e.target.value);
+                currentModelIndex = selectedIdx;
+                targetModelIndex = selectedIdx;
+                morphProgress = 1.0; 
+                isPrearrangeOverrideActive = true; 
+                loadModelTransformSliders(selectedIdx);
+            });
+
+            const updateTransformData = () => {
+                let idx = parseInt(modelConfigSelect.value);
+                if (!modelsBank[idx]) return;
+
+                isPrearrangeOverrideActive = true;
+
+                modelsBank[idx].transform.tx = parseFloat(sliderTx.value);
+                modelsBank[idx].transform.ty = parseFloat(sliderTy.value);
+                modelsBank[idx].transform.tz = parseFloat(sliderTz.value);
+                modelsBank[idx].transform.rx = parseFloat(sliderRx.value) * (Math.PI / 180);
+                modelsBank[idx].transform.ry = parseFloat(sliderRy.value) * (Math.PI / 180);
+                modelsBank[idx].transform.rz = parseFloat(sliderRz.value) * (Math.PI / 180);
+
+                document.getElementById('tx-val').innerText = sliderTx.value;
+                document.getElementById('ty-val').innerText = sliderTy.value;
+                document.getElementById('tz-val').innerText = sliderTz.value;
+                document.getElementById('rx-val').innerText = sliderRx.value + '°';
+                document.getElementById('ry-val').innerText = sliderRy.value + '°';
+                document.getElementById('rz-val').innerText = sliderRz.value + '°';
+            };
+
+            sliderTx.addEventListener('input', updateTransformData);
+            sliderTy.addEventListener('input', updateTransformData);
+            sliderTz.addEventListener('input', updateTransformData);
+            sliderRx.addEventListener('input', updateTransformData);
+            sliderRy.addEventListener('input', updateTransformData);
+            sliderRz.addEventListener('input', updateTransformData);
+        }
+
+        function loadModelTransformSliders(idx) {
+            let model = modelsBank[idx];
+            if (!model) return;
+
+            sliderTx.value = model.transform.tx;
+            sliderTy.value = model.transform.ty;
+            sliderTz.value = model.transform.tz;
+            sliderRx.value = Math.round(model.transform.rx * (180 / Math.PI));
+            sliderRy.value = Math.round(model.transform.ry * (180 / Math.PI));
+            sliderRz.value = Math.round(model.transform.rz * (180 / Math.PI));
+
+            document.getElementById('tx-val').innerText = sliderTx.value;
+            document.getElementById('ty-val').innerText = sliderTy.value;
+            document.getElementById('tz-val').innerText = sliderTz.value;
+            document.getElementById('rx-val').innerText = sliderRx.value + '°';
+            document.getElementById('ry-val').innerText = sliderRy.value + '°';
+            document.getElementById('rz-val').innerText = sliderRz.value + '°';
+        }
+
+        function generateFallbackGeometry() {
+            let fallbackPoints = [];
+            for (let i = 0; i < TARGET_PARTICLE_COUNT; i++) {
+                let u = Math.random();
+                let v = Math.random();
+                let theta = u * 2.0 * Math.PI;
+                let phi = Math.acos(2.0 * v - 1.0);
+                let r = 15; 
+                
+                let x = r * Math.sin(phi) * Math.cos(theta);
+                let y = r * Math.sin(phi) * Math.sin(theta);
+                let z = r * Math.cos(phi);
+
+                fallbackPoints.push({ x: x, y: y, z: z, dist: r });
+            }
+            
+            modelsBank = [{
+                name: "Default Primary Shell",
+                points: fallbackPoints,
+                transform: { tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0 }
+            }];
+            
+            currentModelIndex = 0;
+            targetModelIndex = 0;
+            morphProgress = 1.0;
+
+            rebuildSelectionDropdown();
+            instantiateParticleMesh();
+        }
+
+        function rebuildSelectionDropdown() {
+            modelConfigSelect.innerHTML = '';
+            modelsBank.forEach((model, idx) => {
+                let opt = document.createElement('option');
+                opt.value = idx;
+                opt.innerText = `${idx + 1}: ${model.name}`;
+                modelConfigSelect.appendChild(opt);
+            });
+            modelConfigSelect.value = currentModelIndex;
+            loadModelTransformSliders(currentModelIndex);
+        }
+
+        function instantiateParticleMesh() {
+            if (particleMesh) scene.remove(particleMesh);
+
+            const geometry = new THREE.BufferGeometry();
+            positionsArray = new Float32Array(TARGET_PARTICLE_COUNT * 3);
+            colorsArray = new Float32Array(TARGET_PARTICLE_COUNT * 3);
+
+            let initialData = modelsBank[currentModelIndex].points;
+            for(let i = 0; i < TARGET_PARTICLE_COUNT; i++) {
+                positionsArray[i * 3] = initialData[i].x;
+                positionsArray[i * 3 + 1] = initialData[i].y;
+                positionsArray[i * 3 + 2] = initialData[i].z;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positionsArray, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colorsArray, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.15, vertexColors: true, transparent: true, opacity: 0.90,
+                blending: THREE.AdditiveBlending, depthWrite: false
+            });
+
+            particleMesh = new THREE.Points(geometry, material);
+            scene.add(particleMesh);
+        }
+
+        function handleObjSelection(e) {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+            objInput.blur();
+            
+            document.getElementById('obj-label-text').innerText = `📐 Loaded ${files.length} Models`;
+            statusDisplay.innerText = `Parsing ${files.length} OBJ configurations...`;
+
+            let loadedCount = 0;
+            let tempBank = [];
+            const loader = new THREE.OBJLoader();
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const text = evt.target.result;
+                    const obj = loader.parse(text);
+                    
+                    let parsedVertices = [];
+                    obj.traverse((child) => {
+                        if (child.isMesh) {
+                            const attr = child.geometry.attributes.position;
+                            for (let k = 0; k < attr.count; k++) {
+                                parsedVertices.push(new THREE.Vector3(attr.getX(k), attr.getY(k), attr.getZ(k)));
+                            }
+                        }
+                    });
+
+                    if (parsedVertices.length === 0) {
+                        for (let k = 0; k < TARGET_PARTICLE_COUNT; k++) {
+                            let theta = Math.random() * Math.PI * 2;
+                            let phi = Math.acos(Math.random() * 2 - 1);
+                            parsedVertices.push(new THREE.Vector3(15*Math.sin(phi)*Math.cos(theta), 15*Math.sin(phi)*Math.sin(theta), 15*Math.cos(phi)));
+                        }
+                    }
+
+                    let box = new THREE.Box3().setFromPoints(parsedVertices);
+                    let center = new THREE.Vector3();
+                    box.getCenter(center);
+                    let size = new THREE.Vector3();
+                    box.getSize(size);
+                    let maxDim = Math.max(size.x, size.y, size.z);
+                    let normalScale = 22.0 / (maxDim || 1);
+
+                    let normalizedPositions = [];
+                    for (let j = 0; j < TARGET_PARTICLE_COUNT; j++) {
+                        let sourceIdx = Math.floor((j / TARGET_PARTICLE_COUNT) * parsedVertices.length);
+                        let v = parsedVertices[sourceIdx];
+                        
+                        let nx = (v.x - center.x) * normalScale;
+                        let ny = (v.y - center.y) * normalScale;
+                        let nz = (v.z - center.z) * normalScale;
+                        let dist = Math.sqrt(nx*nx + ny*ny + nz*nz);
+
+                        normalizedPositions.push({ x: nx, y: ny, z: nz, dist: dist });
+                    }
+
+                    tempBank.push({
+                        name: file.name.substring(0, 22),
+                        points: normalizedPositions,
+                        transform: { tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0 }
+                    });
+                    loadedCount++;
+
+                    if (loadedCount === files.length) {
+                        modelsBank = tempBank;
+                        currentModelIndex = 0;
+                        targetModelIndex = Math.min(1, modelsBank.length - 1);
+                        morphProgress = 1.0;
+                        
+                        rebuildSelectionDropdown();
+                        instantiateParticleMesh();
+                        statusDisplay.innerText = `Registry Up: ${modelsBank.length} unique shapes loaded.`;
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function shuffleVisualMatrix() {
+            if (activeModesPool.length > 0) {
+                let randPoolIndex = Math.floor(Math.random() * activeModesPool.length);
+                triggerModeTransition(activeModesPool[randPoolIndex]);
+            }
+            
+            if (modelsBank.length > 1) {
+                currentModelIndex = targetModelIndex;
+                targetModelIndex = (targetModelIndex + 1) % modelsBank.length;
+                morphProgress = 0.0; 
+                
+                modelConfigSelect.value = targetModelIndex;
+                loadModelTransformSliders(targetModelIndex);
+            }
+
+            currentCamPreset = Math.floor(Math.random() * 4);  
+        }
+
+        function handleFileSelection(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            document.getElementById('audio-label-text').innerText = `🎵 ${file.name.substring(0, 12)}...`;
+            statusDisplay.innerText = "Deconstructing spectral frequencies...";
+
+            if (isPlaying) stopAudio();
+
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                frequencyData = new Uint8Array(analyser.frequencyBinCount);
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                audioCtx.decodeAudioData(evt.target.result, function(buffer) {
+                    audioBuffer = buffer;
+                    statusDisplay.innerText = `Engine Live (${Math.round(buffer.duration)}s)`;
+                    playBtn.disabled = false;
+                    restartBtn.disabled = false;
+                    progressSlider.disabled = false;
+                    progressSlider.max = Math.floor(buffer.duration);
+                }, function(err) {
+                    statusDisplay.innerText = "Audio parsing failure.";
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function togglePlayback() { if (isPlaying) pauseAudio(); else playAudio(); }
+
+        function playAudio() {
+            if (!audioBuffer) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            if (isPrearrangeOverrideActive && modelsBank.length > 1) {
+                isPrearrangeOverrideActive = false;
+                targetModelIndex = (currentModelIndex + 1) % modelsBank.length;
+                morphProgress = 1.0; 
+            }
+
+            audioSource = audioCtx.createBufferSource();
+            audioSource.buffer = audioBuffer;
+            audioSource.connect(analyser);
+            audioSource.connect(audioCtx.destination);
+            audioSource.start(0, pausedAt);
+            startTime = audioCtx.currentTime - pausedAt;
+            isPlaying = true;
+            statusDisplay.innerText = "Rendering output...";
+            playBtn.innerText = "Halt Core";
+        }
+
+        function pauseAudio() {
+            if (!isPlaying) return;
+            pausedAt = audioCtx.currentTime - startTime;
+            audioSource.stop();
+            isPlaying = false;
+            statusDisplay.innerText = "Suspended.";
+            playBtn.innerText = "Resume Core";
+        }
+
+        function restartPlayback() {
+            if (!audioBuffer) return;
+            
+            if (isPlaying) {
+                try { audioSource.stop(); } catch(e){}
+            }
+            
+            pausedAt = 0;
+            startTime = audioCtx.currentTime;
+            progressSlider.value = 0;
+            timeDisplay.innerText = "00:00";
+            
+            isPrearrangeOverrideActive = false;
+
+            audioSource = audioCtx.createBufferSource();
+            audioSource.buffer = audioBuffer;
+            audioSource.connect(analyser);
+            audioSource.connect(audioCtx.destination);
+            audioSource.start(0, 0);
+            
+            isPlaying = true;
+            statusDisplay.innerText = "Sequence tracking reset - Core live.";
+            playBtn.innerText = "Halt Core";
+        }
+
+        function stopAudio() {
+            try { audioSource.stop(); } catch(e){}
+            isPlaying = false; pausedAt = 0; progressSlider.value = 0;
+            playBtn.innerText = "Execute Core";
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateCameraPosition(timeOffset = 0, subBassEnergy = 0) {
+            let driftX = Math.sin(timeOffset * 0.2) * 8;
+            let driftY = Math.cos(timeOffset * 0.25) * 4;
+
+            switch(currentCamPreset) {
+                case 0: 
+                    camera.position.set(driftX, 8 + driftY, 48);
+                    camera.lookAt(0, 0, 0);
+                    break;
+                case 1: 
+                    camera.position.set(20 + driftX, 35, 25);
+                    camera.lookAt(0, -2, 0);
+                    break;
+                case 2: 
+                    camera.position.set(-38, driftY, driftX);
+                    camera.lookAt(0, 0, 0);
+                    break;
+                case 3: 
+                    camera.position.set(driftX, -18, 38 + driftY);
+                    camera.lookAt(0, 4, 0);
+                    break;
+            }
+            
+            let objStatusMsg = modelsBank.length > 1 
+                ? `Mesh Shape [${currentModelIndex + 1}/${modelsBank.length}]` 
+                : `Single Geometry Mode`;
+                
+            systemModeTag.innerHTML = `Cam Pres ${currentCamPreset} &bull; ${objStatusMsg} &bull; <b style="color:#ff3366;">Mode ${explicitMode}</b>`;
+        }
+
+        function applyMatrixTransforms(pt, tf) {
+            let outX = pt.x;
+            let outY = pt.y;
+            let outZ = pt.z;
+
+            if(tf.rx !== 0) {
+                let cosX = Math.cos(tf.rx), sinX = Math.sin(tf.rx);
+                let y1 = outY * cosX - outZ * sinX;
+                let z1 = outY * sinX + outZ * cosX;
+                outY = y1; outZ = z1;
+            }
+            if(tf.ry !== 0) {
+                let cosY = Math.cos(tf.ry), sinY = Math.sin(tf.ry);
+                let x1 = outX * cosY + outZ * sinY;
+                let z1 = -outX * sinY + outZ * cosY;
+                outX = x1; outZ = z1;
+            }
+            if(tf.rz !== 0) {
+                let cosZ = Math.cos(tf.rz), sinZ = Math.sin(tf.rz);
+                let x1 = outX * cosZ - outY * sinZ;
+                let y1 = outX * sinZ + outY * cosZ;
+                outX = x1; outY = y1;
+            }
+
+            outX += tf.tx;
+            outY += tf.ty;
+            outZ += tf.tz;
+
+            return { x: outX, y: outY, z: outZ };
+        }
+
+        function executeLocalModeMath(modeId, bNormX, bNormY, bNormZ, bDist, time, i, nBass, nMid, nTreble, nSub) {
+            let targetX = bNormX;
+            let targetY = bNormY;
+            let targetZ = bNormZ;
+            let displacement = 0;
+
+            switch(modeId) {
+                case 0: { 
+                    displacement = Math.sin(bDist * 0.4 - time * 4.0) * (bBass * 3.5);
+                    let ratio = bDist > 0 ? (bDist + displacement) / bDist : 1;
+                    targetX *= ratio; targetY *= ratio; targetZ *= ratio;
+                    break;
+                }
+                case 1: { 
+                    let noise = Math.sin(bNormX * 0.3 + time * 2.0) * Math.cos(bNormY * 0.3 + time * 1.5) * Math.sin(bNormZ * 0.3 + time);
+                    displacement = noise * (1.0 + bMid * 5.0);
+                    let ratio = bDist > 0 ? (bDist + displacement) / bDist : 1;
+                    targetX *= ratio; targetY *= ratio; targetZ *= ratio;
+                    break;
+                }
+                case 2: { 
+                    if (bNormY > 0 && bSub > 0.5) {
+                        targetX += (bNormX / bDist) * (bSub * 7.0 * Math.sin(time * 10 + i));
+                        targetY += (bNormY / bDist) * (bSub * 7.0 * Math.cos(time * 10 + i));
+                        targetZ += (bNormZ / bDist) * (bSub * 7.0 * Math.sin(time * 5 + i));
+                    }
+                    break;
+                }
+                case 3: { 
+                    let angleOffset = (bNormY * 0.08) * (bBass * 4.0) + time;
+                    let cosA = Math.cos(angleOffset); let sinA = Math.sin(angleOffset);
+                    targetX = bNormX * cosA - bNormZ * sinA;
+                    targetZ = bNormX * sinA + bNormZ * cosA;
+                    break;
+                }
+                case 4: { 
+                    let sampleFreqIndex = i % 128;
+                    let spectralForce = (frequencyData ? frequencyData[sampleFreqIndex] / 255 : 0.3) * 4.0;
+                    targetY += Math.sin(bNormX * 0.5 + time * 5.0) * spectralForce;
+                    targetX += Math.cos(bNormZ * 0.5 + time * 3.0) * (bTreble * 2.0);
+                    break;
+                }
+                default: {
+                    if (window.WMP_MODES && window.WMP_MODES.find(m => m.id === modeId)) {
+                        let result = window.WMP_MODES.find(m => m.id === modeId).execute({
+                            x: bNormX, y: bNormY, z: bNormZ, dist: bDist, time: time, index: i,
+                            audio: { sub: bSub, low: bBass, mid: bMid, high: bTreble, frequencyData: frequencyData }
+                        });
+                        targetX = result.x; targetY = result.y; targetZ = result.z;
+                    }
+                    break;
+                }
+            }
+            return { x: targetX, y: targetY, z: targetZ };
+        }
+
+        function updateBackgroundLighting(time, sub, mid, high) {
+            // Shift the illumination color space over time
+            let colorRotation = time * 0.06;
+            
+            // Map frequencies to independent lighting channels to prevent flashing a single hue
+            let hueAmbient = (currentHueBase + colorRotation) % 1.0;
+            let hueFocal = (currentHueBase + 0.35 + colorRotation + mid * 0.05) % 1.0;
+            let hueTransient = (currentHueBase + 0.68 + colorRotation) % 1.0;
+
+            // Compute dynamic light positioning driven by subtle high-frequency movement
+            let posX = 50 + Math.sin(time * 0.4) * (15 + high * 10);
+            let posY = 50 + Math.cos(time * 0.3) * (15 + high * 10);
+
+            // Translate variables into pure CSS HSL parameters
+            // Sub-bass sets the baseline global illumination depth, mids alter focal density
+            let lumAmbient = Math.floor(sub * 16);
+            let lumFocal = Math.floor(mid * 24);
+            let lumTransient = Math.floor(high * 35);
+
+            // Construct three structural lighting nodes inside an overlay radial gradient mesh
+            lightingLayer.style.background = `radial-gradient(circle at ${posX}% ${posY}%, 
+                hsl(${hueTransient * 360}, 95%, ${lumTransient}%) 0%, 
+                hsl(${hueFocal * 360}, 85%, ${lumFocal}%) 35%, 
+                hsl(${hueAmbient * 360}, 75%, ${lumAmbient}%) 70%, 
+                transparent 100%)`;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            let time = performance.now() * 0.001;
+
+            let low = 0, mid = 0, high = 0, sub = 0;
+            if (isPlaying && analyser) {
+                analyser.getByteFrequencyData(frequencyData);
+                let len = frequencyData.length;
+                for(let i=0; i<len; i++) {
+                    if(i < len*0.06) sub += frequencyData[i];
+                    else if(i < len*0.2) low += frequencyData[i];
+                    else if(i < len*0.6) mid += frequencyData[i];
+                    else high += frequencyData[i];
+                }
+                sub /= (len*0.06); low /= (len*0.14); mid /= (len*0.4); high /= (len*0.4);
+
+                const trackSecs = audioCtx.currentTime - startTime;
+                progressSlider.value = Math.floor(trackSecs);
+                timeDisplay.innerText = `${Math.floor(trackSecs/60).toString().padStart(2,'0')}:${Math.floor(trackSecs%60).toString().padStart(2,'0')}`;
+            } else {
+                sub = 55 + Math.sin(time * 0.6) * 15;
+                low = 50 + Math.cos(time * 0.4) * 12;
+                mid = 42 + Math.sin(time * 0.3) * 10;
+                high = 20 + Math.cos(time * 0.7) * 8;
+            }
+
+            // High Precision Signal Interpolation Smoothers
+            smoothSub  += ((sub / 255) - smoothSub) * 0.12;
+            smoothLow  += ((low / 255) - smoothLow) * 0.12;
+            smoothMid  += ((mid / 255) - smoothMid) * 0.12;
+            smoothHigh += ((high / 255) - smoothHigh) * 0.15;
+
+            // Map variables globally
+            window.bSub = smoothSub; window.bBass = smoothLow; window.bMid = smoothMid; window.bTreble = smoothHigh;
+
+            if (!isPrearrangeOverrideActive && smoothSub > BEAT_DETECTION_THRESHOLD && (time - lastCutExecutionTime) > SNAP_COOLDOWN) {
+                shuffleVisualMatrix(); 
+                lastCutExecutionTime = time;
+            }
+
+            if (!isPrearrangeOverrideActive && morphProgress < 1.0) {
+                morphProgress = Math.min(1.0, morphProgress + morphSpeed);
+            }
+
+            if (modeTransitionProgress < 1.0) {
+                modeTransitionProgress = Math.min(1.0, modeTransitionProgress + MODE_TRANSITION_SPEED);
+            }
+
+            currentHueBase += (targetHueBase - currentHueBase) * 0.04;
+            
+            // Execute Background Ambient Light Driver
+            updateBackgroundLighting(time, smoothSub, smoothMid, smoothHigh);
+            updateCameraPosition(time, smoothSub);
+
+            if (particleMesh) {
+                rotationAngle += 0.003 + (smoothLow * 0.015);
+                particleMesh.rotation.y = rotationAngle;
+                particleMesh.rotation.x = Math.sin(time * 0.1) * 0.15;
+
+                let globalScale = baseZoomModifier * (1.0 + smoothSub * 0.08);
+                particleMesh.scale.set(globalScale, globalScale, globalScale);
+
+                const posAttr = particleMesh.geometry.attributes.position;
+                const colAttr = particleMesh.geometry.attributes.color;
+                const tmpColor = new THREE.Color();
+
+                let sourceModel = modelsBank[currentModelIndex];
+                let destinationModel = modelsBank[targetModelIndex];
+
+                for (let i = 0; i < TARGET_PARTICLE_COUNT; i++) {
+                    let sPoint = applyMatrixTransforms(sourceModel.points[i], sourceModel.transform);
+                    let dPoint = applyMatrixTransforms(destinationModel.points[i], destinationModel.transform);
+
+                    let baseNormX = THREE.MathUtils.lerp(sPoint.x, dPoint.x, morphProgress);
+                    let baseNormY = THREE.MathUtils.lerp(sPoint.y, dPoint.y, morphProgress);
+                    let baseNormZ = THREE.MathUtils.lerp(sPoint.z, dPoint.z, morphProgress);
+                    let baseDist = Math.sqrt(baseNormX*baseNormX + baseNormY*baseNormY + baseNormZ*baseNormZ) || 1;
+
+                    let oldStylePos = executeLocalModeMath(previousMode, baseNormX, baseNormY, baseNormZ, baseDist, time, i, smoothLow, smoothMid, smoothHigh, smoothSub);
+                    let newStylePos = executeLocalModeMath(explicitMode, baseNormX, baseNormY, baseNormZ, baseDist, time, i, smoothLow, smoothMid, smoothHigh, smoothSub);
+
+                    positionsArray[i * 3]     = THREE.MathUtils.lerp(oldStylePos.x, newStylePos.x, modeTransitionProgress);
+                    positionsArray[i * 3 + 1] = THREE.MathUtils.lerp(oldStylePos.y, newStylePos.y, modeTransitionProgress);
+                    positionsArray[i * 3 + 2] = THREE.MathUtils.lerp(oldStylePos.z, newStylePos.z, modeTransitionProgress);
+
+                    // --- HIGHER CONTRAST MULTI-PHASE COLOR MAPPING ---
+                    let dynamicOffset = (i / TARGET_PARTICLE_COUNT);
+                    let spectralFrequencyDrive = (frequencyData ? frequencyData[i % 128] / 255 : 0.5);
+
+                    let baseHue = (currentHueBase + dynamicOffset * 0.4 + (baseNormY + 15) / 30 * 0.25 + spectralFrequencyDrive * 0.15) % 1.0;
+                    if (explicitMode % 2 === 0) baseHue = (baseHue + 0.35) % 1.0;
+                    
+                    let finalHue = (baseHue + (smoothMid * 0.08)) % 1.0;
+                    let finalSaturation = 0.75 + (smoothHigh * 0.25);
+                    
+                    let finalLightness = 0.22 + ((baseNormY + 15) / 30 * 0.18) + (smoothSub * 0.22) + (spectralFrequencyDrive * 0.05);
+                    finalLightness = THREE.MathUtils.clamp(finalLightness, 0.15, 0.68);
+                    
+                    tmpColor.setHSL(finalHue, THREE.MathUtils.clamp(finalSaturation, 0, 1), finalLightness);
+                    
+                    colorsArray[i * 3]     = tmpColor.r;
+                    colorsArray[i * 3 + 1] = tmpColor.g;
+                    colorsArray[i * 3 + 2] = tmpColor.b;
+                }
+                posAttr.needsUpdate = true;
+                colAttr.needsUpdate = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
